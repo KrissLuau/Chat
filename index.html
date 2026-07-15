@@ -482,9 +482,11 @@
       alert('Bild ist größer als 12 MB, das ist zu groß. Bitte kleineres Bild wählen.');
       return;
     }
+
     photobtn.disabled = true;
-    const localWrap = addImageMessage(NAME, Date.now());
+    let localWrap = null;
     try{
+      localWrap = addImageMessage(NAME, Date.now());
       const fileBuf = await file.arrayBuffer();
       const mid = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random());
       mySentPhotoIds.add(mid);
@@ -507,9 +509,11 @@
       }
     } catch(e){
       console.error('photo send failed', e);
-      const msgDiv = localWrap.closest('.msg');
-      if(msgDiv) msgDiv.remove();
-      alert('Foto konnte nicht gesendet werden: ' + (e.message || e));
+      if(localWrap){
+        const msgDiv = localWrap.closest('.msg');
+        if(msgDiv) msgDiv.remove();
+      }
+      alert('Foto konnte nicht gesendet werden: ' + (e && e.message ? e.message : e));
     } finally {
       photobtn.disabled = false;
     }
