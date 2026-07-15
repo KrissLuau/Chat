@@ -137,6 +137,20 @@
   }
   #sendbtn:hover{ background:#4dff85; }
   #sendbtn:disabled{ background: var(--border); color: var(--text-dim); cursor:not-allowed; }
+
+  #photobtn{
+    background:none; border:1px solid var(--border); color: var(--text-dim);
+    padding: 0 14px; font-size:16px; cursor:pointer;
+  }
+  #photobtn:hover{ border-color: var(--green-dim); color: var(--green); }
+  #photobtn:disabled{ opacity:0.4; cursor:not-allowed; }
+
+  .msg .img-wrap{ margin-top:4px; }
+  .msg .img-wrap img{
+    max-width: 220px; max-height: 260px; border-radius: 2px;
+    border: 1px solid var(--border); display:block;
+  }
+  .msg .img-loading{ color: var(--text-dim); font-size: 11px; font-style: italic; }
 </style>
 </head>
 <body>
@@ -171,6 +185,8 @@
     </div>
     <div id="messages"></div>
     <div id="inputbar">
+      <button id="photobtn" type="button" title="Foto senden">📎</button>
+      <input type="file" id="fileInput" accept="image/*" style="display:none">
       <input type="text" id="msginput" placeholder="nachricht eingeben..." maxlength="500">
       <button id="sendbtn" type="button">senden</button>
     </div>
@@ -200,6 +216,8 @@
   const msginput = document.getElementById('msginput');
   const sendbtn = document.getElementById('sendbtn');
   const leaveBtn = document.getElementById('leaveBtn');
+  const photobtn = document.getElementById('photobtn');
+  const fileInput = document.getElementById('fileInput');
 
   const words = ["keks","fuchs","lampe","tanne","nebel","kiesel","dose","funk","asche","moos"];
   function genCode(){
@@ -267,6 +285,37 @@
     return new TextDecoder().decode(plainBuf);
   }
 
+  // ---- binary encryption for photos: [4-byte JSON length][JSON meta][image bytes] -> AES-GCM ----
+  async function encryptBinary(metaObj, fileBuf, key){
+    const enc = new TextEncoder();
+    const metaBytes = enc.encode(JSON.stringify(metaObj));
+    const lenPrefix = new Uint8Array(4);
+    new DataView(lenPrefix.buffer).setUint32(0, metaBytes.length, false);
+    const combined = new Uint8Array(4 + metaBytes.length + fileBuf.byteLength);
+    combined.set(lenPrefix, 0);
+    combined.set(metaBytes, 4);
+    combined.set(new Uint8Array(fileBuf), 4 + metaBytes.length);
+
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, combined);
+    const out = new Uint8Array(12 + ciphertext.byteLength);
+    out.set(iv, 0);
+    out.set(new Uint8Array(ciphertext), 12);
+    return out; // Uint8Array: iv + ciphertext, ready to upload as raw bytes
+  }
+  async function decryptBinary(fullBuf, key){
+    const bytes = new Uint8Array(fullBuf);
+    const iv = bytes.slice(0, 12);
+    const ct = bytes.slice(12);
+    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+    const plain = new Uint8Array(plainBuf);
+    const metaLen = new DataView(plain.buffer, plain.byteOffset, 4).getUint32(0, false);
+    const metaBytes = plain.slice(4, 4 + metaLen);
+    const meta = JSON.parse(new TextDecoder().decode(metaBytes));
+    const fileBytes = plain.slice(4 + metaLen);
+    return { meta, fileBytes };
+  }
+
   function addMessage(from, text, ts){
     const empty = messagesEl.querySelector('.sys');
     if(empty) empty.remove();
@@ -278,6 +327,18 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  function addImageMessage(from, ts){
+    const empty = messagesEl.querySelector('.sys');
+    if(empty) empty.remove();
+    const div = document.createElement('div');
+    div.className = 'msg' + (from === NAME ? ' me' : '');
+    const time = new Date(ts).toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
+    div.innerHTML = `<div class="ts">${time}</div><div class="body"><span class="who">${escapeHtml(from)}:</span> <div class="img-wrap"><span class="img-loading">// bild wird entschlüsselt...</span></div></div>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div.querySelector('.img-wrap');
+  }
+
   function showEmptyState(){
     messagesEl.innerHTML = '<div class="sys">// raum ist leer. schreib die erste nachricht.</div>';
   }
@@ -286,6 +347,27 @@
     if(!data || data.event !== 'message') return;
     if(seenIds.has(data.id)) return;
     seenIds.add(data.id);
+
+    if(data.attachment && data.attachment.url){
+      const imgWrap = addImageMessage('...', (data.time || Date.now()/1000) * 1000);
+      try{
+        const res = await fetch(data.attachment.url);
+        const buf = await res.arrayBuffer();
+        const { meta, fileBytes } = await decryptBinary(buf, CRYPTO_KEY);
+        const blob = new Blob([fileBytes], { type: meta.mime || 'image/jpeg' });
+        const url = URL.createObjectURL(blob);
+        const msgDiv = imgWrap.closest('.msg');
+        msgDiv.classList.toggle('me', meta.from === NAME);
+        msgDiv.querySelector('.who').textContent = (meta.from || 'unbekannt') + ':';
+        imgWrap.innerHTML = `<img src="${url}" alt="bild">`;
+      } catch(e){
+        console.log('could not decrypt an image (wrong passphrase or corrupt)');
+        const msgDiv = imgWrap.closest('.msg');
+        if(msgDiv) msgDiv.remove();
+      }
+      return;
+    }
+
     try{
       const decrypted = await decryptText(data.message, CRYPTO_KEY);
       const parsed = JSON.parse(decrypted);
@@ -387,6 +469,33 @@
   sendbtn.addEventListener('click', sendMessage);
   msginput.addEventListener('keydown', (e)=>{
     if(e.key === 'Enter') sendMessage();
+  });
+
+  photobtn.addEventListener('click', ()=> fileInput.click());
+  fileInput.addEventListener('change', async ()=>{
+    const file = fileInput.files[0];
+    fileInput.value = '';
+    if(!file) return;
+    if(file.size > 12 * 1024 * 1024){
+      alert('Bild ist größer als 12 MB, das ist zu groß. Bitte kleineres Bild wählen.');
+      return;
+    }
+    photobtn.disabled = true;
+    try{
+      const fileBuf = await file.arrayBuffer();
+      const meta = { from: NAME, mime: file.type || 'image/jpeg' };
+      const encrypted = await encryptBinary(meta, fileBuf, CRYPTO_KEY);
+      await fetch(`https://ntfy.sh/${TOPIC}`, {
+        method: 'PUT',
+        headers: { 'X-Filename': 'photo.enc' },
+        body: encrypted
+      });
+    } catch(e){
+      console.error('photo send failed', e);
+      alert('Foto konnte nicht gesendet werden.');
+    } finally {
+      photobtn.disabled = false;
+    }
   });
 
   const bootLines = [
