@@ -202,6 +202,7 @@
   let CRYPTO_KEY = null;
   let evtSource = null;
   let seenIds = new Set();
+  let mySentPhotoIds = new Set();
 
   const nameInput = document.getElementById('nameInput');
   const roomInput = document.getElementById('roomInput');
@@ -349,11 +350,14 @@
     seenIds.add(data.id);
 
     if(data.attachment && data.attachment.url){
-      const imgWrap = addImageMessage('...', (data.time || Date.now()/1000) * 1000);
       try{
         const res = await fetch(data.attachment.url);
         const buf = await res.arrayBuffer();
         const { meta, fileBytes } = await decryptBinary(buf, CRYPTO_KEY);
+        if(meta.mid && mySentPhotoIds.has(meta.mid)){
+          return; // already shown locally when we sent it
+        }
+        const imgWrap = addImageMessage('...', (data.time || Date.now()/1000) * 1000);
         const blob = new Blob([fileBytes], { type: meta.mime || 'image/jpeg' });
         const url = URL.createObjectURL(blob);
         const msgDiv = imgWrap.closest('.msg');
@@ -362,8 +366,6 @@
         imgWrap.innerHTML = `<img src="${url}" alt="bild">`;
       } catch(e){
         console.log('could not decrypt an image (wrong passphrase or corrupt)');
-        const msgDiv = imgWrap.closest('.msg');
-        if(msgDiv) msgDiv.remove();
       }
       return;
     }
@@ -481,18 +483,33 @@
       return;
     }
     photobtn.disabled = true;
+    const localWrap = addImageMessage(NAME, Date.now());
     try{
       const fileBuf = await file.arrayBuffer();
-      const meta = { from: NAME, mime: file.type || 'image/jpeg' };
+      const mid = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random());
+      mySentPhotoIds.add(mid);
+      const meta = { from: NAME, mime: file.type || 'image/jpeg', mid };
+
+      // show it locally right away, don't wait for the round trip
+      const localUrl = URL.createObjectURL(new Blob([fileBuf], { type: meta.mime }));
+      localWrap.innerHTML = `<img src="${localUrl}" alt="bild">`;
+      localWrap.closest('.msg').classList.add('me');
+
       const encrypted = await encryptBinary(meta, fileBuf, CRYPTO_KEY);
-      await fetch(`https://ntfy.sh/${TOPIC}`, {
+      const res = await fetch(`https://ntfy.sh/${TOPIC}`, {
         method: 'PUT',
         headers: { 'X-Filename': 'photo.enc' },
         body: encrypted
       });
+      if(!res.ok){
+        const errText = await res.text().catch(()=> '');
+        throw new Error(`Server antwortete mit ${res.status}: ${errText || res.statusText}`);
+      }
     } catch(e){
       console.error('photo send failed', e);
-      alert('Foto konnte nicht gesendet werden.');
+      const msgDiv = localWrap.closest('.msg');
+      if(msgDiv) msgDiv.remove();
+      alert('Foto konnte nicht gesendet werden: ' + (e.message || e));
     } finally {
       photobtn.disabled = false;
     }
