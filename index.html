@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>TERMCHAT</title>
+<title>BLACKWIRE</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
@@ -54,13 +54,14 @@
 
   #landing{
     height:100%; display:none; align-items:center; justify-content:center;
-    padding: 24px;
+    padding: 24px; overflow-y:auto;
   }
   .card{
     width: 100%; max-width: 420px;
     border: 1px solid var(--border);
     background: var(--bg-panel);
     padding: 28px 26px;
+    margin: auto;
   }
   .card h1{
     font-family:'JetBrains Mono',monospace; color: var(--green);
@@ -69,11 +70,11 @@
   .card .sub{ color: var(--text-dim); font-size: 12px; margin-bottom: 22px; }
   label{ display:block; font-size: 11px; letter-spacing:1px; text-transform:uppercase; color: var(--green-dim); margin: 16px 0 6px; }
   label:first-of-type{ margin-top:0; }
-  input[type=text]{
+  input[type=text], input[type=password]{
     width:100%; background:#000; border:1px solid var(--border); color:var(--text);
     padding: 10px 12px; font-size:14px; outline:none;
   }
-  input[type=text]:focus{ border-color: var(--green-dim); }
+  input[type=text]:focus, input[type=password]:focus{ border-color: var(--green-dim); }
   .row{ display:flex; gap:10px; }
   .row input{ flex:1; }
   .genbtn{
@@ -88,10 +89,7 @@
   .primary:hover{ background: #4dff85; }
   .primary:disabled{ background: var(--border); color: var(--text-dim); cursor:not-allowed; }
 
-  .note{
-    margin-top:20px; border-left: 3px solid var(--amber); padding: 10px 12px;
-    font-size: 11.5px; color: var(--text-dim); background: rgba(255,176,0,0.05);
-  }
+  .lock-hint{ font-size: 10.5px; color: var(--text-dim); margin-top: 6px; }
 
   #chat{ display:none; height:100%; flex-direction:column; }
   #chat.show{ display:flex; }
@@ -105,7 +103,7 @@
   .topbar .room b{ color: var(--amber); }
   .topbar .status{ font-size: 10px; color: var(--text-dim); }
   .topbar .status.live{ color: var(--green); }
-  .topbar .status.live::before{ content:"● "; }
+  .topbar .status.live::before{ content:"🔒 "; }
   .topbar .status.down::before{ content:"● "; color: var(--red); }
   .topbar button{
     background:none; border:1px solid var(--border); color: var(--text-dim);
@@ -147,19 +145,21 @@
 
   <div id="landing">
     <div class="card">
-      <h1>&gt;_ TERMCHAT</h1>
-      <div class="sub">live raum-chat · kein login · kein eigener server</div>
+      <h1>&gt;_ BLACKWIRE</h1>
 
-      <label>dein name</label>
+      <label>handle</label>
       <input type="text" id="nameInput" placeholder="z.B. nb0x" maxlength="20">
 
-      <label>raum-code</label>
+      <label>channel</label>
       <div class="row">
         <input type="text" id="roomInput" placeholder="z.B. keks-42-gruen" maxlength="40">
         <button class="genbtn" id="genBtn" type="button">generieren</button>
       </div>
 
-      <button class="primary" id="joinBtn" type="button" disabled>raum betreten →</button>
+      <label>keyphrase</label>
+      <input type="password" id="passInput" placeholder="mind. 6 zeichen" maxlength="60">
+
+      <button class="primary" id="joinBtn" type="button" disabled>jack in →</button>
     </div>
   </div>
 
@@ -183,11 +183,13 @@
   let ROOM = null;
   let NAME = null;
   let TOPIC = null;
+  let CRYPTO_KEY = null;
   let evtSource = null;
   let seenIds = new Set();
 
   const nameInput = document.getElementById('nameInput');
   const roomInput = document.getElementById('roomInput');
+  const passInput = document.getElementById('passInput');
   const joinBtn = document.getElementById('joinBtn');
   const genBtn = document.getElementById('genBtn');
   const landing = document.getElementById('landing');
@@ -212,10 +214,11 @@
   });
 
   function checkReady(){
-    joinBtn.disabled = !(nameInput.value.trim() && roomInput.value.trim());
+    joinBtn.disabled = !(nameInput.value.trim() && roomInput.value.trim() && passInput.value.trim().length >= 6);
   }
   nameInput.addEventListener('input', checkReady);
   roomInput.addEventListener('input', checkReady);
+  passInput.addEventListener('input', checkReady);
 
   function escapeHtml(s){
     return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -223,7 +226,45 @@
 
   function topicFromRoom(room){
     const clean = room.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'');
-    return 'termchat-selfhost-' + clean;
+    return 'blackwire-e2e-' + clean;
+  }
+
+  // ---- crypto: AES-GCM via native Web Crypto API, key from passphrase (PBKDF2) ----
+  function bufToB64(buf){
+    return btoa(String.fromCharCode(...new Uint8Array(buf)));
+  }
+  function b64ToBuf(b64){
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+    return arr.buffer;
+  }
+  async function deriveKey(passphrase, saltStr){
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: enc.encode(saltStr), iterations: 100000, hash: 'SHA-256' },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+  async function encryptText(plainText, key){
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = new TextEncoder();
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plainText));
+    return bufToB64(iv) + '.' + bufToB64(ciphertext);
+  }
+  async function decryptText(payload, key){
+    const [ivB64, ctB64] = payload.split('.');
+    if(!ivB64 || !ctB64) throw new Error('malformed payload');
+    const iv = new Uint8Array(b64ToBuf(ivB64));
+    const ctBuf = b64ToBuf(ctB64);
+    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ctBuf);
+    return new TextDecoder().decode(plainBuf);
   }
 
   function addMessage(from, text, ts){
@@ -241,18 +282,18 @@
     messagesEl.innerHTML = '<div class="sys">// raum ist leer. schreib die erste nachricht.</div>';
   }
 
-  function handleIncoming(data){
+  async function handleIncoming(data){
     if(!data || data.event !== 'message') return;
     if(seenIds.has(data.id)) return;
     seenIds.add(data.id);
-    let from = 'unbekannt', text = data.message || '';
     try{
-      const parsed = JSON.parse(data.message);
-      if(parsed && parsed.from && parsed.text){
-        from = parsed.from; text = parsed.text;
-      }
-    } catch(e){ /* plain text message, use as-is */ }
-    addMessage(from, text, (data.time || Date.now()/1000) * 1000);
+      const decrypted = await decryptText(data.message, CRYPTO_KEY);
+      const parsed = JSON.parse(decrypted);
+      addMessage(parsed.from || 'unbekannt', parsed.text || '', (data.time || Date.now()/1000) * 1000);
+    } catch(e){
+      // wrong passphrase or garbage — silently skip, don't leak that a message exists
+      console.log('could not decrypt a message (wrong passphrase?)');
+    }
   }
 
   async function loadBacklog(){
@@ -261,9 +302,10 @@
       const txt = await res.text();
       const lines = txt.trim().split('\n').filter(Boolean);
       if(lines.length === 0){ showEmptyState(); return; }
-      lines.forEach(line=>{
-        try{ handleIncoming(JSON.parse(line)); } catch(e){}
-      });
+      for(const line of lines){
+        try{ await handleIncoming(JSON.parse(line)); } catch(e){}
+      }
+      if(messagesEl.children.length === 0) showEmptyState();
     } catch(e){
       console.error('backlog load failed', e);
       showEmptyState();
@@ -276,11 +318,11 @@
     try{
       evtSource = new EventSource(`https://ntfy.sh/${TOPIC}/sse`);
       evtSource.onopen = ()=>{
-        statusLabel.textContent = 'live';
+        statusLabel.textContent = 'live · verschlüsselt';
         statusLabel.className = 'status live';
       };
       evtSource.onmessage = (e)=>{
-        try{ handleIncoming(JSON.parse(e.data)); } catch(err){}
+        try{ const data = JSON.parse(e.data); handleIncoming(data); } catch(err){}
       };
       evtSource.onerror = ()=>{
         statusLabel.textContent = 'verbindung wackelt...';
@@ -297,6 +339,12 @@
     ROOM = roomInput.value.trim();
     TOPIC = topicFromRoom(ROOM);
     roomLabel.textContent = ROOM;
+
+    joinBtn.disabled = true;
+    joinBtn.textContent = 'schlüssel wird erzeugt...';
+    CRYPTO_KEY = await deriveKey(passInput.value, TOPIC);
+    joinBtn.textContent = 'jack in →';
+
     landing.style.display = 'none';
     chatEl.classList.add('show');
     messagesEl.innerHTML = '<div class="sys">// lade verlauf...</div>';
@@ -312,6 +360,8 @@
     landing.style.display = 'flex';
     messagesEl.innerHTML = '';
     seenIds = new Set();
+    CRYPTO_KEY = null;
+    checkReady();
   });
 
   async function sendMessage(){
@@ -319,9 +369,11 @@
     if(!text) return;
     sendbtn.disabled = true;
     try{
+      const payload = JSON.stringify({ from: NAME, text: text });
+      const encrypted = await encryptText(payload, CRYPTO_KEY);
       await fetch(`https://ntfy.sh/${TOPIC}`, {
         method: 'POST',
-        body: JSON.stringify({ from: NAME, text: text })
+        body: encrypted
       });
       msginput.value = '';
     } catch(e){
@@ -338,10 +390,11 @@
   });
 
   const bootLines = [
-    "booting termchat v2.2 (selfhosted) ...",
+    "booting blackwire v1.0 ...",
     "initializing local terminal ... OK",
-    "connecting to public relay (ntfy.sh) ... OK",
-    "no accounts. no sandbox. just a room code.",
+    "loading webcrypto (AES-GCM 256) ... OK",
+    "connecting to relay ... OK",
+    "server sees ciphertext only. always.",
     "",
     "ready.",
     ""
