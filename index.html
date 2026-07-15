@@ -186,7 +186,6 @@
     <div id="messages"></div>
     <div id="inputbar">
       <button id="photobtn" type="button" title="Foto senden">📎</button>
-      <input type="file" id="fileInput" accept="image/*" style="display:none">
       <input type="text" id="msginput" placeholder="nachricht eingeben..." maxlength="500">
       <button id="sendbtn" type="button">senden</button>
     </div>
@@ -473,10 +472,22 @@
     if(e.key === 'Enter') sendMessage();
   });
 
-  photobtn.addEventListener('click', ()=> fileInput.click());
-  fileInput.addEventListener('change', async ()=>{
-    const file = fileInput.files[0];
-    fileInput.value = '';
+  photobtn.addEventListener('click', ()=>{
+    // create a fresh input each time — some iOS Safari versions stop
+    // reopening the picker on a reused hidden <input type=file>
+    const freshInput = document.createElement('input');
+    freshInput.type = 'file';
+    freshInput.accept = 'image/*';
+    freshInput.style.cssText = 'position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; pointer-events:none;';
+    document.body.appendChild(freshInput);
+    freshInput.addEventListener('change', ()=>{
+      handlePhotoFile(freshInput.files[0]);
+      freshInput.remove();
+    });
+    freshInput.click();
+  });
+
+  async function handlePhotoFile(file){
     if(!file) return;
     if(file.size > 12 * 1024 * 1024){
       alert('Bild ist größer als 12 MB, das ist zu groß. Bitte kleineres Bild wählen.');
@@ -517,7 +528,7 @@
     } finally {
       photobtn.disabled = false;
     }
-  });
+  }
 
   const bootLines = [
     "booting blackwire v1.0 ...",
