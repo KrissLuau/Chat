@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>TERMCHAT</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  :root{
+    --bg: #060a06;
+    --bg-panel: #0b120b;
+    --green: #33ff6a;
+    --green-dim: #1c8a3e;
+    --amber: #ffb000;
+    --red: #ff4444;
+    --text: #c9e6c9;
+    --text-dim: #5f7a5f;
+    --border: #1a3a1a;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    height: 100vh;
+    overflow: hidden;
+  }
+  body::before{
+    content:"";
+    position: fixed; inset:0;
+    pointer-events:none;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,0.15) 3px);
+    z-index: 999;
+    mix-blend-mode: overlay;
+  }
+  ::selection{ background: var(--green); color:#000; }
+  input, button, textarea{ font-family: inherit; }
+
+  #app{ height:100%; display:flex; flex-direction:column; }
+
+  #boot{
+    position: fixed; inset:0;
+    background: var(--bg);
+    z-index: 1000;
+    padding: 6vh 6vw;
+    font-size: 13px;
+    color: var(--green);
+    white-space: pre-wrap;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  #boot .cursor{ animation: blink 1s step-end infinite; }
+  @keyframes blink{ 50%{ opacity:0; } }
+
+  #landing{
+    height:100%; display:none; align-items:center; justify-content:center;
+    padding: 24px;
+  }
+  .card{
+    width: 100%; max-width: 420px;
+    border: 1px solid var(--border);
+    background: var(--bg-panel);
+    padding: 28px 26px;
+  }
+  .card h1{
+    font-family:'JetBrains Mono',monospace; color: var(--green);
+    font-size: 22px; margin-bottom: 6px; text-shadow: 0 0 14px rgba(51,255,106,.35);
+  }
+  .card .sub{ color: var(--text-dim); font-size: 12px; margin-bottom: 22px; }
+  label{ display:block; font-size: 11px; letter-spacing:1px; text-transform:uppercase; color: var(--green-dim); margin: 16px 0 6px; }
+  label:first-of-type{ margin-top:0; }
+  input[type=text]{
+    width:100%; background:#000; border:1px solid var(--border); color:var(--text);
+    padding: 10px 12px; font-size:14px; outline:none;
+  }
+  input[type=text]:focus{ border-color: var(--green-dim); }
+  .row{ display:flex; gap:10px; }
+  .row input{ flex:1; }
+  .genbtn{
+    background: var(--bg-panel); border:1px solid var(--green-dim); color: var(--green);
+    padding: 0 12px; cursor:pointer; font-size:12px;
+  }
+  .genbtn:hover{ background: var(--green); color:#000; }
+  .primary{
+    margin-top: 22px; width:100%; padding: 12px; background: var(--green); color:#000;
+    border:none; font-weight:700; letter-spacing:.5px; cursor:pointer; font-size:14px;
+  }
+  .primary:hover{ background: #4dff85; }
+  .primary:disabled{ background: var(--border); color: var(--text-dim); cursor:not-allowed; }
+
+  .note{
+    margin-top:20px; border-left: 3px solid var(--amber); padding: 10px 12px;
+    font-size: 11.5px; color: var(--text-dim); background: rgba(255,176,0,0.05);
+  }
+
+  #chat{ display:none; height:100%; flex-direction:column; }
+  #chat.show{ display:flex; }
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: var(--bg-panel); font-size: 12px; gap: 8px; flex-wrap: wrap;
+  }
+  .topbar .room{ color: var(--green); }
+  .topbar .room b{ color: var(--amber); }
+  .topbar .status{ font-size: 10px; color: var(--text-dim); }
+  .topbar .status.live{ color: var(--green); }
+  .topbar .status.live::before{ content:"● "; }
+  .topbar .status.down::before{ content:"● "; color: var(--red); }
+  .topbar button{
+    background:none; border:1px solid var(--border); color: var(--text-dim);
+    padding: 5px 10px; font-size: 11px; cursor:pointer;
+  }
+  .topbar button:hover{ border-color: var(--red); color: var(--red); }
+
+  #messages{
+    flex:1; overflow-y:auto; padding: 16px; font-size: 13.5px;
+  }
+  .msg{ margin-bottom: 12px; display:flex; gap:8px; }
+  .msg .ts{ color: var(--text-dim); font-size: 10px; white-space:nowrap; padding-top:2px; }
+  .msg .body{ flex:1; }
+  .msg .who{ color: var(--green); font-weight:600; }
+  .msg.me .who{ color: var(--amber); }
+  .msg .txt{ color: var(--text); word-break: break-word; }
+  .sys{ color: var(--text-dim); font-size:11.5px; margin-bottom:12px; font-style:italic; }
+
+  #inputbar{
+    display:flex; border-top: 1px solid var(--border); background: var(--bg-panel);
+    padding: 10px 12px; gap: 10px;
+  }
+  #msginput{
+    flex:1; background:#000; border:1px solid var(--border); color: var(--text);
+    padding: 10px 12px; font-size:14px; outline:none;
+  }
+  #msginput:focus{ border-color: var(--green-dim); }
+  #sendbtn{
+    background: var(--green); color:#000; border:none; padding: 0 18px;
+    font-weight:700; cursor:pointer; font-size:13px;
+  }
+  #sendbtn:hover{ background:#4dff85; }
+  #sendbtn:disabled{ background: var(--border); color: var(--text-dim); cursor:not-allowed; }
+</style>
+</head>
+<body>
+<div id="boot"></div>
+<div id="app">
+
+  <div id="landing">
+    <div class="card">
+      <h1>&gt;_ TERMCHAT</h1>
+      <div class="sub">live raum-chat · kein login · kein eigener server</div>
+
+      <label>dein name</label>
+      <input type="text" id="nameInput" placeholder="z.B. nb0x" maxlength="20">
+
+      <label>raum-code</label>
+      <div class="row">
+        <input type="text" id="roomInput" placeholder="z.B. keks-42-gruen" maxlength="40">
+        <button class="genbtn" id="genBtn" type="button">generieren</button>
+      </div>
+
+      <button class="primary" id="joinBtn" type="button" disabled>raum betreten →</button>
+    </div>
+  </div>
+
+  <div id="chat">
+    <div class="topbar">
+      <div class="room">raum: <b id="roomLabel"></b></div>
+      <span class="status" id="statusLabel">verbinde...</span>
+      <button id="leaveBtn" type="button">verlassen</button>
+    </div>
+    <div id="messages"></div>
+    <div id="inputbar">
+      <input type="text" id="msginput" placeholder="nachricht eingeben..." maxlength="500">
+      <button id="sendbtn" type="button">senden</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  let ROOM = null;
+  let NAME = null;
+  let TOPIC = null;
+  let evtSource = null;
+  let seenIds = new Set();
+
+  const nameInput = document.getElementById('nameInput');
+  const roomInput = document.getElementById('roomInput');
+  const joinBtn = document.getElementById('joinBtn');
+  const genBtn = document.getElementById('genBtn');
+  const landing = document.getElementById('landing');
+  const chatEl = document.getElementById('chat');
+  const roomLabel = document.getElementById('roomLabel');
+  const statusLabel = document.getElementById('statusLabel');
+  const messagesEl = document.getElementById('messages');
+  const msginput = document.getElementById('msginput');
+  const sendbtn = document.getElementById('sendbtn');
+  const leaveBtn = document.getElementById('leaveBtn');
+
+  const words = ["keks","fuchs","lampe","tanne","nebel","kiesel","dose","funk","asche","moos"];
+  function genCode(){
+    const w = words[Math.floor(Math.random()*words.length)];
+    const n = Math.floor(Math.random()*90+10);
+    const w2 = words[Math.floor(Math.random()*words.length)];
+    return `${w}-${n}-${w2}`;
+  }
+  genBtn.addEventListener('click', ()=>{
+    roomInput.value = genCode();
+    checkReady();
+  });
+
+  function checkReady(){
+    joinBtn.disabled = !(nameInput.value.trim() && roomInput.value.trim());
+  }
+  nameInput.addEventListener('input', checkReady);
+  roomInput.addEventListener('input', checkReady);
+
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function topicFromRoom(room){
+    const clean = room.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'');
+    return 'termchat-selfhost-' + clean;
+  }
+
+  function addMessage(from, text, ts){
+    const empty = messagesEl.querySelector('.sys');
+    if(empty) empty.remove();
+    const div = document.createElement('div');
+    div.className = 'msg' + (from === NAME ? ' me' : '');
+    const time = new Date(ts).toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
+    div.innerHTML = `<div class="ts">${time}</div><div class="body"><span class="who">${escapeHtml(from)}:</span> <span class="txt">${escapeHtml(text)}</span></div>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function showEmptyState(){
+    messagesEl.innerHTML = '<div class="sys">// raum ist leer. schreib die erste nachricht.</div>';
+  }
+
+  function handleIncoming(data){
+    if(!data || data.event !== 'message') return;
+    if(seenIds.has(data.id)) return;
+    seenIds.add(data.id);
+    let from = 'unbekannt', text = data.message || '';
+    try{
+      const parsed = JSON.parse(data.message);
+      if(parsed && parsed.from && parsed.text){
+        from = parsed.from; text = parsed.text;
+      }
+    } catch(e){ /* plain text message, use as-is */ }
+    addMessage(from, text, (data.time || Date.now()/1000) * 1000);
+  }
+
+  async function loadBacklog(){
+    try{
+      const res = await fetch(`https://ntfy.sh/${TOPIC}/json?poll=1&since=all`);
+      const txt = await res.text();
+      const lines = txt.trim().split('\n').filter(Boolean);
+      if(lines.length === 0){ showEmptyState(); return; }
+      lines.forEach(line=>{
+        try{ handleIncoming(JSON.parse(line)); } catch(e){}
+      });
+    } catch(e){
+      console.error('backlog load failed', e);
+      showEmptyState();
+    }
+  }
+
+  function connectLive(){
+    statusLabel.textContent = 'verbinde...';
+    statusLabel.className = 'status';
+    try{
+      evtSource = new EventSource(`https://ntfy.sh/${TOPIC}/sse`);
+      evtSource.onopen = ()=>{
+        statusLabel.textContent = 'live';
+        statusLabel.className = 'status live';
+      };
+      evtSource.onmessage = (e)=>{
+        try{ handleIncoming(JSON.parse(e.data)); } catch(err){}
+      };
+      evtSource.onerror = ()=>{
+        statusLabel.textContent = 'verbindung wackelt...';
+        statusLabel.className = 'status down';
+      };
+    } catch(e){
+      statusLabel.textContent = 'offline';
+      statusLabel.className = 'status down';
+    }
+  }
+
+  async function joinRoom(){
+    NAME = nameInput.value.trim().slice(0,20);
+    ROOM = roomInput.value.trim();
+    TOPIC = topicFromRoom(ROOM);
+    roomLabel.textContent = ROOM;
+    landing.style.display = 'none';
+    chatEl.classList.add('show');
+    messagesEl.innerHTML = '<div class="sys">// lade verlauf...</div>';
+    await loadBacklog();
+    connectLive();
+    msginput.focus();
+  }
+  joinBtn.addEventListener('click', joinRoom);
+
+  leaveBtn.addEventListener('click', ()=>{
+    if(evtSource) evtSource.close();
+    chatEl.classList.remove('show');
+    landing.style.display = 'flex';
+    messagesEl.innerHTML = '';
+    seenIds = new Set();
+  });
+
+  async function sendMessage(){
+    const text = msginput.value.trim();
+    if(!text) return;
+    sendbtn.disabled = true;
+    try{
+      await fetch(`https://ntfy.sh/${TOPIC}`, {
+        method: 'POST',
+        body: JSON.stringify({ from: NAME, text: text })
+      });
+      msginput.value = '';
+    } catch(e){
+      console.error('send failed', e);
+      alert('Nachricht konnte nicht gesendet werden. Verbindung prüfen.');
+    } finally {
+      sendbtn.disabled = false;
+      msginput.focus();
+    }
+  }
+  sendbtn.addEventListener('click', sendMessage);
+  msginput.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter') sendMessage();
+  });
+
+  const bootLines = [
+    "booting termchat v2.2 (selfhosted) ...",
+    "initializing local terminal ... OK",
+    "connecting to public relay (ntfy.sh) ... OK",
+    "no accounts. no sandbox. just a room code.",
+    "",
+    "ready.",
+    ""
+  ];
+  const bootEl = document.getElementById('boot');
+  const landingEl = document.getElementById('landing');
+  let bli = 0, bci = 0;
+  function typeBoot(){
+    if(bli >= bootLines.length){
+      bootEl.innerHTML += '<span class="cursor">█</span>';
+      setTimeout(()=>{
+        bootEl.style.transition = 'opacity .4s ease';
+        bootEl.style.opacity = '0';
+        landingEl.style.display = 'flex';
+        setTimeout(()=> bootEl.remove(), 400);
+      }, 400);
+      return;
+    }
+    const line = bootLines[bli];
+    if(bci <= line.length){
+      bootEl.innerHTML = bootLines.slice(0,bli).join('\n') + (bli>0?'\n':'') + line.slice(0,bci) + '<span class="cursor">█</span>';
+      bci++;
+      setTimeout(typeBoot, 12);
+    } else {
+      bli++; bci = 0;
+      setTimeout(typeBoot, 55);
+    }
+  }
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    bootEl.remove();
+    landingEl.style.display = 'flex';
+  } else {
+    typeBoot();
+  }
+
+})();
+</script>
+</body>
+</html>
