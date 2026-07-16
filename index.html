@@ -162,16 +162,16 @@
       <h1>&gt;_ BLACKWIRE</h1>
 
       <label>handle</label>
-      <input type="text" id="nameInput" placeholder="z.B. nb0x" maxlength="20">
+      <input type="text" id="nameInput" placeholder="e.g. nb0x" maxlength="20">
 
       <label>channel</label>
       <div class="row">
-        <input type="text" id="roomInput" placeholder="z.B. keks-42-gruen" maxlength="40">
-        <button class="genbtn" id="genBtn" type="button">generieren</button>
+        <input type="text" id="roomInput" placeholder="e.g. ghost-42-fern" maxlength="40">
+        <button class="genbtn" id="genBtn" type="button">generate</button>
       </div>
 
       <label>keyphrase</label>
-      <input type="password" id="passInput" placeholder="mind. 6 zeichen" maxlength="60">
+      <input type="password" id="passInput" placeholder="min. 6 characters" maxlength="60">
 
       <button class="primary" id="joinBtn" type="button" disabled>jack in →</button>
     </div>
@@ -179,15 +179,15 @@
 
   <div id="chat">
     <div class="topbar">
-      <div class="room">raum: <b id="roomLabel"></b></div>
-      <span class="status" id="statusLabel">verbinde...</span>
-      <button id="leaveBtn" type="button">verlassen</button>
+      <div class="room">channel: <b id="roomLabel"></b></div>
+      <span class="status" id="statusLabel">connecting...</span>
+      <button id="leaveBtn" type="button">leave</button>
     </div>
     <div id="messages"></div>
     <div id="inputbar">
-      <button id="photobtn" type="button" title="Foto senden">📎</button>
-      <input type="text" id="msginput" placeholder="nachricht eingeben..." maxlength="500">
-      <button id="sendbtn" type="button">senden</button>
+      <button id="photobtn" type="button" title="Send photo">📎</button>
+      <input type="text" id="msginput" placeholder="type a message..." maxlength="500">
+      <button id="sendbtn" type="button">send</button>
     </div>
   </div>
 
@@ -217,7 +217,6 @@
   const sendbtn = document.getElementById('sendbtn');
   const leaveBtn = document.getElementById('leaveBtn');
   const photobtn = document.getElementById('photobtn');
-  const fileInput = document.getElementById('fileInput');
 
   const words = ["keks","fuchs","lampe","tanne","nebel","kiesel","dose","funk","asche","moos"];
   function genCode(){
@@ -333,14 +332,14 @@
     const div = document.createElement('div');
     div.className = 'msg' + (from === NAME ? ' me' : '');
     const time = new Date(ts).toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
-    div.innerHTML = `<div class="ts">${time}</div><div class="body"><span class="who">${escapeHtml(from)}:</span> <div class="img-wrap"><span class="img-loading">// bild wird entschlüsselt...</span></div></div>`;
+    div.innerHTML = `<div class="ts">${time}</div><div class="body"><span class="who">${escapeHtml(from)}:</span> <div class="img-wrap"><span class="img-loading">// decrypting image...</span></div></div>`;
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return div.querySelector('.img-wrap');
   }
 
   function showEmptyState(){
-    messagesEl.innerHTML = '<div class="sys">// raum ist leer. schreib die erste nachricht.</div>';
+    messagesEl.innerHTML = '<div class="sys">// room is empty. send the first message.</div>';
   }
 
   async function handleIncoming(data){
@@ -361,8 +360,8 @@
         const url = URL.createObjectURL(blob);
         const msgDiv = imgWrap.closest('.msg');
         msgDiv.classList.toggle('me', meta.from === NAME);
-        msgDiv.querySelector('.who').textContent = (meta.from || 'unbekannt') + ':';
-        imgWrap.innerHTML = `<img src="${url}" alt="bild">`;
+        msgDiv.querySelector('.who').textContent = (meta.from || 'unknown') + ':';
+        imgWrap.innerHTML = `<img src="${url}" alt="photo">`;
       } catch(e){
         console.log('could not decrypt an image (wrong passphrase or corrupt)');
       }
@@ -372,7 +371,7 @@
     try{
       const decrypted = await decryptText(data.message, CRYPTO_KEY);
       const parsed = JSON.parse(decrypted);
-      addMessage(parsed.from || 'unbekannt', parsed.text || '', (data.time || Date.now()/1000) * 1000);
+      addMessage(parsed.from || 'unknown', parsed.text || '', (data.time || Date.now()/1000) * 1000);
     } catch(e){
       // wrong passphrase or garbage — silently skip, don't leak that a message exists
       console.log('could not decrypt a message (wrong passphrase?)');
